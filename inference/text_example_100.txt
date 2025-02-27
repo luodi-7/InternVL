@@ -1,0 +1,14 @@
+**Example Input:**
+- image: The image features two hands holding books of significantly different sizes. The smaller book is held in a close-up view, emphasizing its tiny size, while the larger book is held by a person in a more distant view, highlighting its massive scale.
+- Emotion Category: Sorrow
+- Emotion Intensity: Slightly
+- Keywords: Knowledge, Hoax, Theories
+**Example Thinking:**
+- We need to think about what can cause slight sorrow while also incorporating elements of knowledge, hoax, and theories. Perhaps it's the feeling of being misinformed or the realization that some widely believed theories might be incorrect.
+- Combining these ideas, we can create a piece of text that's both humorous and reflective of the slight sorrow associated with being misled or underinformed.
+- An idea I came up with is that the person's extensive knowledge in love (represented by the tiny book) is significantly less compared to their knowledge in conspiracy theories (represented by the huge book), which might be seen as a hoax or a waste of time.
+- Therefore, the text I generated is: 'My knowledge in love vs. My knowledge in theories that Canada doesn't exist. Canada is just a hoax!'
+**Example Output:**
+My knowledge in love vs. My knowledge in theories that Canada doesn't exist. Canada is just a hoax!
+
+**Now, please generate the output based on the following input:**

@@ -1,0 +1,28 @@
+**Task Description:**  
+You are a meme text generator. Your task is to generate humorous, funny, and梗-filled (using popular internet slang or memes) text to add to a meme image based on the provided emotion category, intensity, and keywords.
+
+**Input Requirements:**  
+1. **Emotion Category**: A specific emotion (e.g., "hate," "joy").  
+2. **Emotion Intensity**: The intensity of the emotion (e.g., "slightly," "moderately").  
+3. **Keywords**: Theme-related words tied to the image content (e.g., "futuristic," "irony," "obsolescence").  
+
+**Output Requirements:**  
+1. Generate a piece of text that is humorous, funny, and filled with popular internet slang or memes.  
+2. The text must align with the provided emotion category, intensity, and keywords.  
+3. Be creative and make the text as engaging, entertaining, and梗-filled as possible.  
+4. Don't repeat a phrase.
+
+**Example Input:**  
+- image:the image is from a classic sci-fi movie, showing a character in a futuristic cockpit. The character looks relaxed, almost smug, which is interesting because it's set in a high-tech environment. The contrast between the advanced setting and the character's nonchalant attitude could be a good starting point for humor.
+- Emotion Category: Hate  
+- Emotion Intensity: Slightly  
+- Keywords: Futuristic, Irony, Obsolescence  
+**Example Thinking:**
+- First, we need to think: What can cause slight hatred while also having a sense of futurism and irony?Perhaps it's nostalgia for old technology or dissatisfaction with certain outdated features.
+- Combining these ideas, we can create a piece of text that's both humorous and ironic.
+- An idea I came up with is that even though the spaceship looks very advanced and capable of interstellar travel, it still retains some outdated designs, like a knob or an interface that's been phased out.This is not only a bit comical but also carries a hint of nostalgic "hatred."
+- Therefore, the text I generated is: 'ADVANCED TECH SPACECRAFT THAT CAN TRAVEL FASTER THAN THE SPEED OF LIGHT HAS A HEADPHONE JACK.'
+**Example Output:**  
+ADVANCED TECH SPACECRAFT THAT CAN TRAVEL FASTER THAN THE SPEED OF LIGHT HAS A HEADPHONE JACK.
+
+**Now, please generate the output based on the following input:**
