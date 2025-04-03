@@ -707,7 +707,6 @@ def preprocess_internlm(
         attention_mask=input_ids.ne(tokenizer.pad_token_id),
     )
 
-
 def preprocess_internvl2_5(
         template_name,
         sources,
@@ -722,13 +721,13 @@ def preprocess_internvl2_5(
     assert len(sources) == 1, 'process only the first conversations'
     conversations = sources[0]
 
-    if conversations[0]['from'] == 'system':
-        system_prompt = conversations[0]['value']
-        conversations = conversations[1:]  # remove system prompt
-    else:
-        conv = get_conv_template(template_name)
-        system_prompt = conv.system_message
-        # system_prompt = None
+    # if conversations[0]['from'] == 'system':
+    #     system_prompt = conversations[0]['value']
+    #     conversations = conversations[1:]  # remove system prompt
+    # else:
+    #     conv = get_conv_template(template_name)
+    #     system_prompt = conv.system_message
+    #     # system_prompt = None
 
     if not text_only:
         new_conversations = []
@@ -747,12 +746,14 @@ def preprocess_internvl2_5(
         assert current_image_idx == num_image, f'{current_image_idx} != {num_image}'
 
     batches, roles = [], []
-    if system_prompt is not None:
-        batches.append(f'<|im_start|>system\n{system_prompt}<|im_end|>\n')
-        roles.append('system')
+    raw_prompts=[]
+    # if system_prompt is not None:
+    #     batches.append(f'<|im_start|>system\n{system_prompt}<|im_end|>\n')
+    #     roles.append('system')
     for conversation in conversations:
         if conversation['from'] == 'human':
             batches.append(f'<|im_start|>user\n{conversation["value"]}<|im_end|>\n')
+            raw_prompts.append(f'<|im_start|>user{conversation["value"]}<|im_end|>\n<|im_start|>assistant\n')
             roles.append('human')
         elif conversation['from'] == 'gpt':
             batches.append(f'<|im_start|>assistant\n{conversation["value"]}<|im_end|>\n')
@@ -805,9 +806,12 @@ def preprocess_internvl2_5(
 
     return dict(
         input_ids=input_ids,
+        raw_prompts=raw_prompts,
         labels=targets,
         attention_mask=input_ids.ne(tokenizer.pad_token_id),
     )
+
+
 
 
 def find_closest_aspect_ratio(aspect_ratio, target_ratios, width, height, image_size):

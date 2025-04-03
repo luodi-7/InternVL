@@ -1072,6 +1072,7 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
         "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
         ```"""
 
+
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1194,9 +1195,7 @@ class InternLM2ForCausalLM(InternLM2PreTrainedModel):
         do_sample: bool = True,
         temperature: float = 0.8,
         top_p: float = 0.8,
-        meta_instruction: str = 'You are an AI assistant whose name is InternLM (书生·浦语).\n'
-                                '- InternLM (书生·浦语) is a conversational language model that is developed by Shanghai AI Laboratory (上海人工智能实验室). It is designed to be helpful, honest, and harmless.\n'
-                                '- InternLM (书生·浦语) can understand and communicate fluently in the language chosen by the user such as English and 中文.',
+        meta_instruction: str = '',
         **kwargs,
     ):
         inputs = self.build_inputs(tokenizer, query, history, meta_instruction)

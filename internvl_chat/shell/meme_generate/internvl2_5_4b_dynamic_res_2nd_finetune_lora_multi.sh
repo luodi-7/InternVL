@@ -1,8 +1,8 @@
 set -x
 
 GPUS=${GPUS:-1}
-BATCH_SIZE=${BATCH_SIZE:-4}
-PER_DEVICE_BATCH_SIZE=${PER_DEVICE_BATCH_SIZE:-4}
+BATCH_SIZE=${BATCH_SIZE:-2}
+PER_DEVICE_BATCH_SIZE=${PER_DEVICE_BATCH_SIZE:-2}
 GRADIENT_ACC=$((BATCH_SIZE / PER_DEVICE_BATCH_SIZE / GPUS))
 
 
@@ -11,7 +11,7 @@ export MASTER_PORT=34239
 export TF_CPP_MIN_LOG_LEVEL=3
 export LAUNCHER=pytorch
 
-OUTPUT_DIR='/mnt/afs/xueyingyi/generate_text_multi_big_100'
+OUTPUT_DIR='/fs-computility/ai-shen/xueyingyi/grpo_test'
 
 if [ ! -d "$OUTPUT_DIR" ]; then
   mkdir -p "$OUTPUT_DIR"
@@ -28,24 +28,26 @@ torchrun \
   --master_addr=127.0.0.1 \
   --nproc_per_node=${GPUS} \
   --master_port=${MASTER_PORT} \
-  internvl/train/internvl_chat_finetune_multi_image.py \
-  --model_name_or_path "/mnt/afs/share/InternVL25-4B" \
+  internvl/train/internvl_chat_finetune_cot_grpo.py \
+  --model_name_or_path "/fs-computility/ai-shen/xueyingyi/model/cot_box_text" \
+  --ref_model_path "/fs-computility/ai-shen/xueyingyi/model/cot_box_text" \
   --conv_style "internvl2_5" \
   --use_fast_tokenizer False \
+  --use_grpo True \
   --output_dir ${OUTPUT_DIR} \
-  --meta_path "/mnt/afs/xueyingyi/meme/data/C_generate_train_multi_100.jsonl" \
-  --meta_path_eval "/mnt/afs/xueyingyi/meme/data/C_generate_eval_multi_100.jsonl" \
+  --meta_path "/fs-computility/ai-shen/xueyingyi/cot_picture/data/train_data.jsonl" \
+  --meta_path_eval "/fs-computility/ai-shen/xueyingyi/cot_picture/data/eval_data.jsonl" \
   --overwrite_output_dir True \
   --load_best_model_at_end True \
-  --metric_for_best_model "avg_similarity" \
+  --metric_for_best_model "avg_text_similarity" \
   --force_image_size 448 \
   --max_dynamic_patch 6 \
   --down_sample_ratio 0.5 \
   --drop_path_rate 0.0 \
   --freeze_llm True \
-  --freeze_mlp True \
-  --freeze_backbone True \
-  --use_llm_lora 8 \
+  --freeze_mlp False \
+  --freeze_backbone False \
+  --use_llm_lora 16 \
   --vision_select_layer -1 \
   --dataloader_num_workers 4 \
   --bf16 True \

@@ -1,5 +1,5 @@
 # --------------------------------------------------------
-# InternVL
+# InternVLbatch_chat
 # Copyright (c) 2024 OpenGVLab
 # Licensed under The MIT License [see LICENSE for details]
 # --------------------------------------------------------
@@ -19,6 +19,7 @@ from torch.nn import CrossEntropyLoss
 from transformers import (AutoModel, GenerationConfig, LlamaForCausalLM,
                           LlamaTokenizer, Qwen2ForCausalLM)
 from transformers.modeling_outputs import CausalLMOutputWithPast
+
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import ModelOutput, logging
 
@@ -34,7 +35,6 @@ def version_cmp(v1, v2, op='eq'):
     from packaging import version
     op_func = getattr(operator, op)
     return op_func(version.parse(v1), version.parse(v2))
-
 
 
 class InternVLChatModel(PreTrainedModel):
@@ -95,8 +95,6 @@ class InternVLChatModel(PreTrainedModel):
         )
 
         self.img_context_token_id = None
-        self.pause_token_start_id = None
-        self.pause_token_end_id = None
         self.conv_template = get_conv_template(self.template)
         if hasattr(config, 'system_message'):
             self.system_message = config.system_message
@@ -109,9 +107,11 @@ class InternVLChatModel(PreTrainedModel):
 
         if config.use_llm_lora:
             self.wrap_llm_lora(r=config.use_llm_lora, lora_alpha=2 * config.use_llm_lora)
-
-
-
+    def prepare_grpo(self, ref_model_path):
+        """加载参考模型并冻结参数"""
+        self.ref_model = InternVLChatModel.from_pretrained(ref_model_path)
+        self.ref_model.requires_grad_(False)
+        self.ref_model.eval()
 
     def wrap_backbone_lora(self, r=128, lora_alpha=256, lora_dropout=0.05):
         lora_config = LoraConfig(
@@ -164,20 +164,17 @@ class InternVLChatModel(PreTrainedModel):
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        # 处理 image flags
+
         image_flags = image_flags.squeeze(-1)
         input_embeds = self.language_model.get_input_embeddings()(input_ids).clone()
 
-        # 提取视觉特征
         vit_embeds = self.extract_feature(pixel_values)
         vit_embeds = vit_embeds[image_flags == 1]
         vit_batch_size = pixel_values.shape[0]
 
-        # 处理输入嵌入
         B, N, C = input_embeds.shape
         input_embeds = input_embeds.reshape(B * N, C)
 
-        # 打印动态信息（分布式训练）
         if torch.distributed.is_initialized() and torch.distributed.get_rank() == 0:
             print(f'dynamic ViT batch size: {vit_batch_size}, images per sample: {vit_batch_size / B}, dynamic token length: {N}')
             if statistics is not None:
@@ -185,7 +182,8 @@ class InternVLChatModel(PreTrainedModel):
                 self.num_samples += num_samples
                 print(f'total_samples={self.num_samples}, {num_samples=}, {num_padding_tokens=}, {num_padding_images=}')
 
-        # 处理图像上下文 token
+        
+
         input_ids = input_ids.reshape(B * N)
         selected = (input_ids == self.img_context_token_id)
         try:
@@ -194,15 +192,12 @@ class InternVLChatModel(PreTrainedModel):
         except Exception as e:
             vit_embeds = vit_embeds.reshape(-1, C)
             print(f'warning: {e}, input_embeds[selected].shape={input_embeds[selected].shape}, '
-                f'vit_embeds.shape={vit_embeds.shape}')
+                  f'vit_embeds.shape={vit_embeds.shape}')
             n_token = selected.sum()
             input_embeds[selected] = input_embeds[selected] * 0.0 + vit_embeds[:n_token]
             ignore_flag = True
 
-        # 恢复输入嵌入的形状
         input_embeds = input_embeds.reshape(B, N, C)
-
-        # 调用语言模型
         outputs = self.language_model(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
@@ -213,49 +208,50 @@ class InternVLChatModel(PreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        logits = outputs.logits
 
-        # 计算损失
+        logits = outputs.logits
+        breakpoint()
+        
+
         loss = None
-        if labels is not None:
-            # Shift logits 和 labels
+        if labels is not None and loss_weight is not None:
+            loss_weight = torch.tensor(loss_weight, dtype=torch.float32, device=labels.device)
+            # Shift so that tokens < n predict n
             shift_logits = logits[..., :-1, :].contiguous()
             shift_labels = labels[..., 1:].contiguous()
-
-            # 创建损失掩码，忽略 pause token
-            loss_mask = (shift_labels < self.pause_token_start_id).float()
-
-            # 计算交叉熵损失
+            shift_weights = loss_weight[..., 1:].contiguous()
+            # Flatten the tokens
             loss_fct = CrossEntropyLoss(reduction='none')
             shift_logits = shift_logits.view(-1, self.language_model.config.vocab_size)
             shift_labels = shift_labels.view(-1)
+            shift_weights = shift_weights.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            shift_weights = shift_weights.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
-            # 打印mask前信息
-            print("-------------loss before mask:------------", loss)
 
-            # 应用损失掩码
-            loss = (loss * loss_mask.view(-1)).sum() / loss_mask.sum()
+            shift_weights_sum = shift_weights.sum()
+            if loss_reduction_all_gather:
+                dist.all_reduce(shift_weights_sum, op=dist.ReduceOp.AVG)
 
-            # 打印mask后信息
-            print("-------------loss after mask:-------------", loss)
-
-
-            # 如果存在 loss_weight，则进一步调整损失
-            if loss_weight is not None:
-                loss_weight = torch.tensor(loss_weight, dtype=torch.float32, device=labels.device)
-                shift_weights = loss_weight[..., 1:].contiguous()
-                shift_weights = shift_weights.view(-1)
-                shift_weights_sum = shift_weights.sum()
-                if loss_reduction_all_gather:
-                    dist.all_reduce(shift_weights_sum, op=dist.ReduceOp.AVG)
-                loss = loss * shift_weights
-                loss = loss.sum() / shift_weights_sum
-
-            # 如果 ignore_flag 为 True，则忽略损失
+            loss = loss * shift_weights
+            loss = loss.sum() / shift_weights_sum
+            if ignore_flag:
+                loss = loss * 0.0
+        elif labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            shift_logits = shift_logits.view(-1, self.language_model.config.vocab_size)
+            shift_labels = shift_labels.view(-1)
+            # Enable model parallelism
+            shift_labels = shift_labels.to(shift_logits.device)
+            loss = loss_fct(shift_logits, shift_labels)
             if ignore_flag:
                 loss = loss * 0.0
 
-        # 返回结果
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
@@ -318,12 +314,6 @@ class InternVLChatModel(PreTrainedModel):
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
         self.img_context_token_id = img_context_token_id
 
-        pause_token_start_id = tokenizer.convert_tokens_to_ids("<pause_0>")
-        self.pause_token_start_id = pause_token_start_id
-
-        pause_token_end_id = tokenizer.convert_tokens_to_ids("<pause_17>")
-        self.pause_token_end_id = pause_token_end_id
-
         if verbose and pixel_values is not None:
             image_bs = pixel_values.shape[0]
             print(f'dynamic ViT batch size: {image_bs}')
@@ -356,7 +346,7 @@ class InternVLChatModel(PreTrainedModel):
             attention_mask=attention_mask,
             **generation_config
         )
-        responses = tokenizer.batch_decode(generation_output, skip_special_tokens=True)
+        responses = tokenizer.batch_decode(generation_output, skip_special_tokens=False)
         responses = [response.split(template.sep.strip())[0].strip() for response in responses]
         return responses
 
@@ -373,12 +363,6 @@ class InternVLChatModel(PreTrainedModel):
 
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
         self.img_context_token_id = img_context_token_id
-
-        pause_token_start_id = tokenizer.convert_tokens_to_ids("<pause_0>")
-        self.pause_token_start_id = pause_token_start_id
-
-        pause_token_end_id = tokenizer.convert_tokens_to_ids("<pause_17>")
-        self.pause_token_end_id = pause_token_end_id
 
         template = get_conv_template(self.template)
         template.system_message = self.system_message
@@ -405,14 +389,18 @@ class InternVLChatModel(PreTrainedModel):
         input_ids = model_inputs['input_ids'].to(device)
         attention_mask = model_inputs['attention_mask'].to(device)
         generation_config['eos_token_id'] = eos_token_id
+
         generation_output = self.generate(
             pixel_values=pixel_values,
             input_ids=input_ids,
             attention_mask=attention_mask,
             **generation_config
         )
+        breakpoint()
         response = tokenizer.batch_decode(generation_output, skip_special_tokens=True)[0]
-        response = response.split(template.sep.strip())[0].strip()
+        breakpoint()
+        response = response[0].split(template.sep.strip())[0].strip()
+        breakpoint()
         history.append((question, response))
         if return_history:
             return response, history
@@ -422,7 +410,6 @@ class InternVLChatModel(PreTrainedModel):
             if verbose:
                 print(query_to_print, response)
             return response
-
     @torch.no_grad()
     def generate(
             self,
@@ -454,6 +441,7 @@ class InternVLChatModel(PreTrainedModel):
         else:
             input_embeds = self.language_model.get_input_embeddings()(input_ids)
 
+
         outputs = self.language_model.generate(
             inputs_embeds=input_embeds,
             attention_mask=attention_mask,
@@ -462,11 +450,9 @@ class InternVLChatModel(PreTrainedModel):
             use_cache=True,
             **generate_kwargs,
         )
-        # 过滤掉 pause token 的输出
-        mask = outputs < self.pause_token_start_id
-        outputs = torch.where(mask, outputs, torch.tensor(-100, device=outputs.device))  # 将 pause token 替换为 -100
 
         return outputs
+
 
     @property
     def lm_head(self):
@@ -478,3 +464,164 @@ class InternVLChatModel(PreTrainedModel):
     def get_output_embeddings(self):
         return self.language_model.get_output_embeddings()
 
+    
+    def grpo_generate(
+        self,
+        tokenizer,
+        pixel_values: torch.Tensor,
+        prompts: List[str],
+        generation_config: dict,
+        num_generations: int = 3,#默认
+        max_completion_length: int = 1024
+    ):
+        """GRPO专用生成方法"""
+        
+        # 文本预处理
+        inputs = tokenizer(prompts, padding=True, return_tensors="pt")
+        input_ids = inputs["input_ids"].to(self.device)
+        
+        # # 扩展输入以匹配生成数量
+        expanded_input_ids = input_ids.repeat_interleave(num_generations, dim=0)
+        expanded_pixel_values = pixel_values.repeat_interleave(num_generations, dim=0)
+        breakpoint()
+        # 生成配置
+        gen_config = GenerationConfig(
+            **generation_config,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id
+        )
+        
+        # 无梯度生成
+        original_mode=self.training
+        self.eval()  # 切换到评估模式
+        with torch.no_grad():
+            outputs = self.generate(
+                pixel_values=expanded_pixel_values,
+                input_ids=expanded_input_ids,
+                generation_config=gen_config,
+                max_new_tokens=max_completion_length,
+                return_dict_in_generate=True
+            )
+        self.train(original_mode)  # 恢复原始模式
+        
+        
+        # 处理输出
+        completion_ids = outputs.sequences
+        breakpoint()
+        #不能用因为之后那边generation_output的padding不是pad_token_id而是eos_token_id
+        # completion_mask = (completion_ids != tokenizer.pad_token_id).long()
+        # 确定序列中哪些位置是EOS token。
+        is_eos = completion_ids == tokenizer.eos_token_id  # 布尔张量，形状为 (batch_size, seq_len)
+        # 初始化张量，用于存储每个序列中第一个EOS的索引。如果没有找到EOS，默认使用序列长度。
+        eos_idx = torch.full((is_eos.size(0),), is_eos.size(1), dtype=torch.long, device=completion_ids.device)
+        
+        # 找到包含至少一个EOS的序列。
+        mask_exists = is_eos.any(dim=1)
+        # 对于包含EOS的序列，更新eos_idx为第一个EOS的位置索引。
+        eos_idx[mask_exists] = is_eos.int().argmax(dim=1)[mask_exists]
+        
+        # 创建张量，包含每个序列位置的索引 [0, 1, 2, ..., seq_len-1]。
+        # 并将其扩展到与序列数量一致。
+        sequence_indices = torch.arange(is_eos.size(1), device=completion_ids.device).expand(is_eos.size(0), -1)
+        
+        # 构建掩码：位置索引小于等于第一个EOS位置的标记为1。
+        completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
+        breakpoint()
+
+
+
+
+        return {
+            'expanded_input_ids':expanded_input_ids,
+            'completion_ids':completion_ids,
+            'completion_mask':completion_mask,
+            'expanded_pixel_values':expanded_pixel_values
+        }
+
+    def compute_completion_logits(
+        self,
+        tokenizer,
+        pixel_values: torch.Tensor,
+        input_ids: torch.LongTensor,
+        completion_ids: torch.LongTensor
+    ):
+        """带梯度的logits计算"""
+        # 拼接完整输入
+        
+        full_input = torch.cat([input_ids, completion_ids], dim=1)
+        breakpoint()
+        attention_mask = (full_input != tokenizer.pad_token_id).long()
+        
+        # 获取图像特征
+        vit_embeds = self.extract_feature(pixel_values)
+        
+        # 构建输入embedding
+        input_embeds = self.language_model.get_input_embeddings()(full_input)
+        img_context_token_id = tokenizer.convert_tokens_to_ids('<IMG_CONTEXT>')
+        self.img_context_token_id = img_context_token_id
+        assert self.img_context_token_id is not None
+        selected = (full_input == self.img_context_token_id)
+        new_input_embeds = input_embeds.clone()
+        try:
+            breakpoint()
+            new_input_embeds[selected] = vit_embeds.reshape(-1, new_input_embeds.shape[-1])
+        
+        except Exception as e:
+            # 异常处理逻辑（参考 forward 函数）
+            n_token = selected.sum()
+            breakpoint()
+            vit_embeds = vit_embeds.reshape(-1, new_input_embeds.shape[-1])
+            new_input_embeds[selected] = vit_embeds[:n_token]
+        # 带梯度的前向计算
+        with torch.enable_grad():
+            outputs = self.language_model(
+                inputs_embeds=new_input_embeds, 
+                attention_mask=attention_mask,
+                return_dict=True
+            )
+        breakpoint()
+        # 提取completion部分的logits
+        logits = outputs.logits[:, input_ids.shape[1]-1:-1, :]
+        return logits
+
+    def grpo_loss(self, logits, ref_logits, rewards, mask,completion_ids,num_generations,beta=0.1):
+        """GRPO损失函数"""
+        # 计算策略概率
+        # 将原始logits转换为log概率，计算维度为词汇表维度
+        policy_log_probs = torch.log_softmax(logits, dim=-1)
+        ref_log_probs = torch.log_softmax(ref_logits, dim=-1).detach()
+        breakpoint()
+
+
+        # 计算逐token log概率（即取真实sample的词的log_probs)
+        token_log_probs = torch.gather(policy_log_probs, dim=-1,index=completion_ids.unsqueeze(-1)).squeeze(-1)
+        ref_token_log_probs = torch.gather(ref_log_probs, dim=-1,index=completion_ids.unsqueeze(-1)).squeeze(-1)
+        breakpoint()
+
+        mean_rewards = rewards.view(-1, num_generations).mean(dim=1)
+        std_rewards = rewards.view(-1, num_generations).std(dim=1)
+        # 将均值和标准差扩展为与原扁平奖励张量相同形状。
+        mean_rewards = mean_rewards.repeat_interleave(num_generations, dim=0)
+        std_rewards = std_rewards.repeat_interleave(num_generations, dim=0)
+        # 对奖励做归一化，计算优势。
+        advantages = (rewards - mean_rewards) / (std_rewards + 1e-4)
+        breakpoint()
+        # 计算参考模型和当前模型对数概率之间每个 token 的 KL 散度。
+        per_token_kl = torch.exp(ref_token_log_probs - token_log_probs) - (ref_token_log_probs - token_log_probs) - 1
+        breakpoint()
+        # 计算策略梯度损失部分，
+        # 使用 token_log_probs.detach() 阻止梯度传入基线值。（当每批数据迭代一次时，这时生成的和更新的是一个）
+        per_token_loss = torch.exp(token_log_probs - token_log_probs.detach()) * advantages.unsqueeze(1)
+        breakpoint()
+        # 将基于 token 的损失与 KL 惩罚项（乘上 beta）相结合，并取负值。
+        per_token_loss = -(per_token_loss - beta * per_token_kl)
+        breakpoint()
+        
+        # 结合 completion 掩码计算每个序列的平均损失：
+        # - 用掩码乘上损失，仅有效 token 参与计算；
+        # - 对每个序列的损失求和后除以有效 token 数目；
+        # - 最后对所有序列求平均。
+        loss = ((per_token_loss * mask).sum(dim=1) / mask.sum(dim=1)).mean()
+        breakpoint()
+        
+        return loss
