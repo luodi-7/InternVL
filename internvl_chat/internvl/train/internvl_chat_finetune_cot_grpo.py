@@ -1130,7 +1130,7 @@ class GRPOTrainer(Trainer):
         tokenizer = AutoTokenizer.from_pretrained("/fs-computility/ai-shen/shared/dilab/model/InternVL2_5-4B", add_eos_token=False, trust_remote_code=True, use_fast=False)
         img_context_token_id = tokenizer.convert_tokens_to_ids(IMG_CONTEXT_TOKEN)
         self.img_context_token_id = img_context_token_id
-        #==========================================================
+        #========================需要替换的部分==================================
 
         generation_output = model.grpo_generate(
             tokenizer=tokenizer,
@@ -1143,10 +1143,10 @@ class GRPOTrainer(Trainer):
     },
             num_generations=num_generations
         )
-        breakpoint()
+        
         #===========================================================
         """
-        传出：
+        替换后返回值：
         形状都是：[batch_size*num_generations,seq_len]或者[batch_size*num_generations,own_dim]
         {
             'expanded_input_ids':expanded_input_ids,
@@ -1167,7 +1167,7 @@ class GRPOTrainer(Trainer):
             input_ids=generation_output['expanded_input_ids'],
             completion_ids=generation_output['completion_ids']
         )
-        breakpoint()
+        
         
         # Step 3: 计算参考模型logits
         with torch.no_grad():
@@ -1177,31 +1177,7 @@ class GRPOTrainer(Trainer):
                 input_ids=generation_output['expanded_input_ids'],
                 completion_ids=generation_output['completion_ids']
             )
-        breakpoint()
-        responses=[]
-
-        template = get_conv_template(model.template)
-        for i in range(num_generations):  
-            response_ids = generation_output['completion_ids'][i]  
-            decoded_response = tokenizer.batch_decode(  
-                response_ids,   
-                skip_special_tokens=False  # 根据需要设置是否跳过特殊标记  
-            ) 
-            responses.append(decoded_response)
-        breakpoint()
-        processed_responses=[]
-        for response in responses:
-            # 将response中的所有字符串连接成一个长字符串
-            full_string = ''.join(response)
-            # 分割字符串，取'<|im_end|>'前的部分
-            parts = full_string.split('<|im_end|>')
-            # 取分割后的第一部分，并去除首尾空白
-            processed_string = parts[0].strip()
-            processed_string=extract_meme_text(processed_string)
-            # 添加到结果列表
-            processed_responses.append(processed_string)
-
-        breakpoint()
+        
 
         # Step 4: 模拟奖励计算
         rewards = torch.rand(len(raw_prompts) * num_generations).to(model.device)
@@ -1215,8 +1191,7 @@ class GRPOTrainer(Trainer):
             completion_ids=generation_output['completion_ids'],
             num_generations=num_generations
         )
-        breakpoint()
-        # 添加指标记录
+        
         self.log({"train/reward": rewards.mean().item()})
         
         return (loss, outputs) if return_outputs else loss

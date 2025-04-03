@@ -210,7 +210,7 @@ class InternVLChatModel(PreTrainedModel):
         )
 
         logits = outputs.logits
-        breakpoint()
+        
         
 
         loss = None
@@ -396,11 +396,11 @@ class InternVLChatModel(PreTrainedModel):
             attention_mask=attention_mask,
             **generation_config
         )
-        breakpoint()
+        
         response = tokenizer.batch_decode(generation_output, skip_special_tokens=True)[0]
-        breakpoint()
+        
         response = response[0].split(template.sep.strip())[0].strip()
-        breakpoint()
+        
         history.append((question, response))
         if return_history:
             return response, history
@@ -483,7 +483,7 @@ class InternVLChatModel(PreTrainedModel):
         # # 扩展输入以匹配生成数量
         expanded_input_ids = input_ids.repeat_interleave(num_generations, dim=0)
         expanded_pixel_values = pixel_values.repeat_interleave(num_generations, dim=0)
-        breakpoint()
+        
         # 生成配置
         gen_config = GenerationConfig(
             **generation_config,
@@ -507,7 +507,7 @@ class InternVLChatModel(PreTrainedModel):
         
         # 处理输出
         completion_ids = outputs.sequences
-        breakpoint()
+        
         #不能用因为之后那边generation_output的padding不是pad_token_id而是eos_token_id
         # completion_mask = (completion_ids != tokenizer.pad_token_id).long()
         # 确定序列中哪些位置是EOS token。
@@ -526,7 +526,7 @@ class InternVLChatModel(PreTrainedModel):
         
         # 构建掩码：位置索引小于等于第一个EOS位置的标记为1。
         completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
-        breakpoint()
+        
 
 
 
@@ -549,7 +549,7 @@ class InternVLChatModel(PreTrainedModel):
         # 拼接完整输入
         
         full_input = torch.cat([input_ids, completion_ids], dim=1)
-        breakpoint()
+        
         attention_mask = (full_input != tokenizer.pad_token_id).long()
         
         # 获取图像特征
@@ -563,13 +563,13 @@ class InternVLChatModel(PreTrainedModel):
         selected = (full_input == self.img_context_token_id)
         new_input_embeds = input_embeds.clone()
         try:
-            breakpoint()
+            
             new_input_embeds[selected] = vit_embeds.reshape(-1, new_input_embeds.shape[-1])
         
         except Exception as e:
             # 异常处理逻辑（参考 forward 函数）
             n_token = selected.sum()
-            breakpoint()
+            
             vit_embeds = vit_embeds.reshape(-1, new_input_embeds.shape[-1])
             new_input_embeds[selected] = vit_embeds[:n_token]
         # 带梯度的前向计算
@@ -579,7 +579,7 @@ class InternVLChatModel(PreTrainedModel):
                 attention_mask=attention_mask,
                 return_dict=True
             )
-        breakpoint()
+        
         # 提取completion部分的logits
         logits = outputs.logits[:, input_ids.shape[1]-1:-1, :]
         return logits
@@ -590,13 +590,13 @@ class InternVLChatModel(PreTrainedModel):
         # 将原始logits转换为log概率，计算维度为词汇表维度
         policy_log_probs = torch.log_softmax(logits, dim=-1)
         ref_log_probs = torch.log_softmax(ref_logits, dim=-1).detach()
-        breakpoint()
+        
 
 
         # 计算逐token log概率（即取真实sample的词的log_probs)
         token_log_probs = torch.gather(policy_log_probs, dim=-1,index=completion_ids.unsqueeze(-1)).squeeze(-1)
         ref_token_log_probs = torch.gather(ref_log_probs, dim=-1,index=completion_ids.unsqueeze(-1)).squeeze(-1)
-        breakpoint()
+        
 
         mean_rewards = rewards.view(-1, num_generations).mean(dim=1)
         std_rewards = rewards.view(-1, num_generations).std(dim=1)
@@ -605,23 +605,23 @@ class InternVLChatModel(PreTrainedModel):
         std_rewards = std_rewards.repeat_interleave(num_generations, dim=0)
         # 对奖励做归一化，计算优势。
         advantages = (rewards - mean_rewards) / (std_rewards + 1e-4)
-        breakpoint()
+        
         # 计算参考模型和当前模型对数概率之间每个 token 的 KL 散度。
         per_token_kl = torch.exp(ref_token_log_probs - token_log_probs) - (ref_token_log_probs - token_log_probs) - 1
-        breakpoint()
+        
         # 计算策略梯度损失部分，
         # 使用 token_log_probs.detach() 阻止梯度传入基线值。（当每批数据迭代一次时，这时生成的和更新的是一个）
         per_token_loss = torch.exp(token_log_probs - token_log_probs.detach()) * advantages.unsqueeze(1)
-        breakpoint()
+        
         # 将基于 token 的损失与 KL 惩罚项（乘上 beta）相结合，并取负值。
         per_token_loss = -(per_token_loss - beta * per_token_kl)
-        breakpoint()
+        
         
         # 结合 completion 掩码计算每个序列的平均损失：
         # - 用掩码乘上损失，仅有效 token 参与计算；
         # - 对每个序列的损失求和后除以有效 token 数目；
         # - 最后对所有序列求平均。
         loss = ((per_token_loss * mask).sum(dim=1) / mask.sum(dim=1)).mean()
-        breakpoint()
+        
         
         return loss

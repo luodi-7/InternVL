@@ -650,7 +650,7 @@ class BatchProcessor:
         }
 
         # 批量生成
-        breakpoint()
+        
         responses, generation_output,input_ids = self.model.batch_chat(
             tokenizer=self.tokenizer,
             pixel_values=pixel_values,
@@ -659,7 +659,7 @@ class BatchProcessor:
             generation_config=generation_config
         )#generation_output为实际answer_ids和logits
         completion_ids = generation_output.sequences
-        breakpoint()
+        
         tokenizer=self.tokenizer
         is_eos = completion_ids == tokenizer.eos_token_id  # 布尔张量，形状为 (batch_size, seq_len)
         # 初始化张量，用于存储每个序列中第一个EOS的索引。如果没有找到EOS，默认使用序列长度。
@@ -676,7 +676,7 @@ class BatchProcessor:
         
         # 构建掩码：位置索引小于等于第一个EOS位置的标记为1。
         completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
-        breakpoint()
+        
 
 
         # 重组结果为 [batch_size, num_generations]
@@ -729,7 +729,7 @@ def main():
             # 处理一个批次
             gen_output = processor.process_batch(batch_data)
             # 处理绘图和评分
-            breakpoint()
+            
             gen_all_scores=[]
             original_data=gen_output['original_data']
             grouped_responses=gen_output['grouped_responses']
@@ -751,7 +751,7 @@ def main():
                     )
                     group_images.append(gen_image_path)
                     group_outputs.append({'gen_image': gen_image_path})
-                breakpoint()
+                
                 # 统一进行评分
                 gen_scores = similarity_model.score_group(group_images)
                 # 将评分结果合并到输出中
@@ -759,14 +759,14 @@ def main():
                     output['gen_score'] = score
                     scores.append(output)
                     gen_all_scores.append(score)
-                breakpoint()
+                
                 
                 
                 
             list_logits = list(gen_output['completion_logits'])
-            breakpoint()
+            
             result = torch.stack(list_logits, dim=1)
-            breakpoint() 
+             
             # 处理每个样本的结果
 
             generations={
@@ -778,7 +778,7 @@ def main():
                 'scores':torch.tensor(gen_all_scores)
             }
 
-            breakpoint()
+            
             for data_idx, data in enumerate(original_data):
                 # 获取标注文本
                 label_text = next(c['value'] for c in data['conversations'] if c['from'] == 'gpt')
