@@ -616,7 +616,7 @@ class InternVLChatModel(PreTrainedModel):
         # 将基于 token 的损失与 KL 惩罚项（乘上 beta）相结合，并取负值。
         per_token_loss = -(per_token_loss - beta * per_token_kl)
         
-        
+        breakpoint()
         # 结合 completion 掩码计算每个序列的平均损失：
         # - 用掩码乘上损失，仅有效 token 参与计算；
         # - 对每个序列的损失求和后除以有效 token 数目；

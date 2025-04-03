@@ -528,6 +528,7 @@ class SimilarityCalculator:
     #         'gen_image': gen_image_path,
     #         'gen_score': float(gen_score),
     #     }
+    #==================================================
 
     def generate_image(self, gen_text: str, image_path: str,
                     group_id: str, answer_id: str) -> str:
@@ -552,7 +553,7 @@ class SimilarityCalculator:
     def _process_single_image(self, image_path: str, text: str, 
                              output_dir: str, prefix: str) -> str:
         """处理单个图文合成"""
-        # 从数据库获取检测框
+        # 获取检测框
         new_image_path = image_path.replace('cot_picture/quickmeme_drawn/', 'quickmeme_inpainting/')  
         
 

@@ -702,7 +702,6 @@ class LazySupervisedDataset(Dataset):
                         ret = self.multi_modal_multi_image_get_item(data_item)
                     else:
                         ret = self.multi_modal_get_item(data_item)
-                        print(ret)
                 elif 'video' in data_item and data_item['video'] is not None and data_item['video'] != '':
                     ret = self.video_get_item(data_item)
                 else:
@@ -1193,8 +1192,8 @@ class GRPOTrainer(Trainer):
         )
         
         self.log({"train/reward": rewards.mean().item()})
-        
-        return (loss, outputs) if return_outputs else loss
+        breakpoint()
+        return loss
 def main():
     # Apply necessary patches for the transformers library
     replace_llama_rmsnorm_with_fused_rmsnorm()
